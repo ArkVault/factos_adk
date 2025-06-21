@@ -1,0 +1,14 @@
+google-adk
+a2a-sdk
+fastapi
+uvicorn
+pydantic
+firecrawl-py
+transformers
+torch
+sentence-transformers
+faiss-cpu
+numpy
+chromadb
+beautifulsoup4
+requests
