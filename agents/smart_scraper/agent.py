@@ -1,40 +1,46 @@
+import requests
+import json
+from typing import Dict, Any
 import os
-from pydantic import HttpUrl, PrivateAttr
-from dotenv import load_dotenv
-from firecrawl import FirecrawlApp
-from typing import Dict
-
-
-load_dotenv()
 
 class SmartScraperAgent:
-    _firecrawl: FirecrawlApp = PrivateAttr()
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        print("[SmartScraperAgent] Initializing...")
-        if not os.getenv("FIRECRAWL_API_KEY"):
-            raise ValueError("FIRECRAWL_API_KEY environment variable not set.")
-        self._firecrawl = FirecrawlApp(api_key=os.getenv("FIRECRAWL_API_KEY"))
-
-    def run(self, url: str) -> str:
+    def run(self, url: str) -> Dict[str, Any]:
         """
-        Scrapes a single URL for its main content and returns it as a string.
-        This function is intended to be used as a tool by an ADK LlmAgent.
+        Uses a direct REST API call to scrape the content of a single URL.
         """
-        print(f"Scraping {url} with Firecrawl...")
+        print(f"Scraping {url} with Firecrawl REST API...")
+        api_key = os.getenv("FIRECRAWL_API_KEY")
+
+        if not api_key:
+            return {"error": "FIRECRAWL_API_KEY environment variable not set."}
+
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        }
+        
+        scrape_url_endpoint = "https://api.firecrawl.dev/v1/scrape"
+        payload = {
+            "url": url,
+            "onlyMainContent": True
+        }
+
         try:
-            http_url = str(HttpUrl(url=url))
-            scraped_data_obj = self._firecrawl.scrape_url(url=http_url, params={'pageOptions': {'onlyMainContent': True}})
+            response = requests.post(scrape_url_endpoint, headers=headers, json=payload, timeout=60)
+            response.raise_for_status()
             
-            scraped_data: Dict = dict(scraped_data_obj)
-
-            if scraped_data and 'markdown' in scraped_data:
-                return scraped_data['markdown']
+            scraped_data = response.json()
+            if scraped_data.get("success"):
+                return {"content": scraped_data["data"].get("markdown", "")}
             else:
-                print(f"Warning: No markdown content found for {url}. Full response: {scraped_data}")
-                return ""
+                return {"error": f"API call failed: {scraped_data.get('error')}"}
 
-        except Exception as e:
-            print(f"An error occurred while scraping {url}: {e}")
-            return f"Error scraping {url}: {e}"
+        except requests.exceptions.HTTPError as e:
+            error_details = ""
+            try:
+                error_details = e.response.json()
+            except json.JSONDecodeError:
+                error_details = e.response.text
+            return {"error": f"HTTP error during scrape: {e}. Details: {error_details}"}
+        except requests.exceptions.RequestException as e:
+            return {"error": f"Unexpected error during scrape: {e}"}
