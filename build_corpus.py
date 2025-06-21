@@ -18,7 +18,7 @@ def main():
     fact_checker_urls = [
         "https://www.factcheck.org/",
         "https://reporterslab.org/fact-checking/",
-        "https://apnews.com/ap-fact-check"
+        "https://apnews.com/ap-fact-check",
     ]
 
     # 2. Initialize the agents
@@ -27,7 +27,7 @@ def main():
     fact_matcher = FactCheckMatcherAgent()
 
     # 3. Run the corpus builder to get the documents
-    documents = corpus_builder.run(fact_checker_urls)
+    documents = corpus_builder.run(urls=fact_checker_urls)
 
     # 4. Add the scraped documents to the persistent vector database
     if documents:
