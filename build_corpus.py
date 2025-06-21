@@ -1,11 +1,19 @@
 import os
-from dotenv import load_dotenv
-
+import sys
 from agents.corpus_builder.agent import CorpusBuilderAgent
 from agents.fact_check_matcher.agent import FactCheckMatcherAgent
 
-# Load environment variables from .env file
-load_dotenv()
+def load_env():
+    """Manually loads environment variables from a .env file."""
+    try:
+        with open('.env', 'r') as f:
+            for line in f:
+                if '=' in line:
+                    key, value = line.strip().split('=', 1)
+                    os.environ[key] = value
+                    print(f"Loaded {key}")
+    except FileNotFoundError:
+        print("Warning: .env file not found. Relying on system environment variables.")
 
 def main():
     """
@@ -13,6 +21,9 @@ def main():
     and adding their content to the ChromaDB vector store.
     """
     print("--- Starting Corpus Build Process ---")
+
+    # Manually load environment variables first
+    load_env()
 
     # 1. Define the fact-checker sources
     fact_checker_urls = [

@@ -24,7 +24,10 @@ class CorpusBuilderAgent:
 
         for url in urls:
             print(f"Scraping {url} with Firecrawl REST API...")
-            payload = {"url": url, "pageOptions": {"onlyMainContent": True}}
+            payload = {
+                "url": url, 
+                "onlyMainContent": True
+            }
             
             try:
                 response = requests.post(scrape_url, headers=headers, json=payload, timeout=60)

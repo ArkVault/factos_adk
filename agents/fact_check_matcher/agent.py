@@ -36,12 +36,10 @@ class FactCheckMatcherAgent:
         print(f"Adding {len(documents)} new documents to the collection...")
         # Add new documents. ChromaDB handles embedding via the model provided at collection creation.
         # However, since we use SentenceTransformer, we'll embed manually for consistency.
-        embeddings = self._embedding_model.embed(documents).tolist()
+        embeddings = self._embedding_model.encode(documents).tolist()
         
-        # Create unique IDs for each document
-        # This is a simple way to create IDs, could be more robust
-        start_id = self._collection.count()
-        ids = [f"doc_{start_id + i}" for i, _ in enumerate(documents)]
+        # Generate IDs for the documents
+        ids = [f"doc_{self._collection.count() + i}" for i in range(len(documents))]
 
         self._collection.add(
             embeddings=embeddings,
