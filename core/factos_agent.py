@@ -1,97 +1,99 @@
-from google.adk.agents import LlmAgent, SequentialAgent, BaseAgent
-from google.adk.agents.invocation_context import InvocationContext
+from google.adk.agents import LlmAgent, SequentialAgent
+from google.adk.agents.base_agent import BaseAgent
 from google.adk.events import Event
-from google.genai.types import Content, Part
-from typing import Callable, AsyncGenerator
+from typing import Callable, AsyncIterator, Dict, Any, List
 
 from agents.smart_scraper.agent import SmartScraperAgent
 from agents.claim_extractor.agent import ClaimExtractorAgent
 from agents.fact_check_matcher.agent import FactCheckMatcherAgent
 from agents.truth_scorer.agent import TruthScorerAgent
-from agents.response_formatter.agent import ResponseFormatterAgent
+from schemas.messages import ScoredClaim
 
 
 class FunctionAgent(BaseAgent):
-    """A simple agent that executes a Python function."""
-
-    model_config = {"arbitrary_types_allowed": True}
-    
-    # The function to execute
+    """An agent that runs a simple Python function."""
     fn: Callable
-    # The key to read from session state for the function's input
     input_key: str
-    # The key to write the function's output to in session state
     output_key: str
 
-    async def _run_async_impl(self, ctx: InvocationContext) -> AsyncGenerator[Event, None]:
-        """Runs the function and yields a final response event."""
-        print(f"[{self.name}] Running function...")
-        
-        # Get input from session state
+    async def _run_async_impl(self, ctx: 'InvocationContext') -> AsyncIterator[Event]:
         fn_input = ctx.session.state.get(self.input_key)
-        
-        if fn_input is None:
-            raise ValueError(f"Input key '{self.input_key}' not found in session state.")
-
-        # Run the function
         result = self.fn(fn_input)
-
-        # Store the output in session state
         ctx.session.state[self.output_key] = result
+        if False:
+            yield
+
+class FactosAgent(BaseAgent):
+    """The main agent for the Factos pipeline."""
+
+    def __init__(self, **kwargs):
+        super().__init__(name="FactosAgent", **kwargs)
+
+    async def _run_async_impl(
+        self, ctx: 'InvocationContext'
+    ) -> AsyncIterator[Event]:
         
-        # Yield a final event to signal completion
-        yield Event(
-            author=self.name, 
-            content=Content(parts=[Part(text=str(result))])
+        processing_pipeline = SequentialAgent(
+            name="ProcessingPipeline",
+            sub_agents=[
+                FunctionAgent(
+                    fn=SmartScraperAgent().run,
+                    name="SmartScraper",
+                    input_key="url",
+                    output_key="scraped_content",
+                ),
+                FunctionAgent(
+                    fn=ClaimExtractorAgent().run,
+                    name="ClaimExtractor",
+                    input_key="scraped_content",
+                    output_key="claims",
+                ),
+                FunctionAgent(
+                    fn=FactCheckMatcherAgent().run,
+                    name="FactCheckMatcher",
+                    input_key="claims",
+                    output_key="fact_checks",
+                ),
+                FunctionAgent(
+                    fn=TruthScorerAgent().run,
+                    name="TruthScorer",
+                    input_key="fact_checks",
+                    output_key="scored_claims",
+                ),
+            ]
         )
 
+        # Run the processing pipeline first
+        async for event in processing_pipeline.run_async(ctx):
+            # We don't yield these events, we just let the state update
+            pass
 
-# 1. Define Tool-based Agents for each step
-# Use the reliable FunctionAgent for deterministic steps
-smart_scraper_agent = FunctionAgent(
-    name="SmartScraper",
-    fn=SmartScraperAgent().run,
-    input_key="url",
-    output_key="scraped_content",
-)
+        # Now, dynamically create the final formatting agent with the data
+        scored_claims: List[ScoredClaim] = ctx.session.state.get("scored_claims", [])
+        
+        # Create a string representation of the scored claims
+        claims_str = "\\n".join([f"- Claim: {sc.claim.claim_text}\\n  Score: {sc.truth_score}\\n  Explanation: {sc.explanation}" for sc in scored_claims])
 
-claim_extractor_agent = FunctionAgent(
-    name="ClaimExtractor",
-    fn=ClaimExtractorAgent().run,
-    input_key="scraped_content",
-    output_key="claims",
-)
+        formatter_instruction = f"""You are a fact-checking analyst. Your task is to generate a clear, concise, and user-friendly Markdown report based on the provided data.
+Your report should follow this structure exactly:
 
-fact_check_matcher_agent = FunctionAgent(
-    name="FactCheckMatcher",
-    fn=FactCheckMatcherAgent().run,
-    input_key="claims",
-    output_key="fact_checks",
-)
+1.  **Overall Verdict**: Start with a single, conclusive verdict for the main claim (e.g., "False", "Misleading", "True").
+2.  **Main Claim**: State the most important claim that was analyzed.
+3.  **Detailed Analysis**: Provide a paragraph explaining *why* the claim received its verdict. Synthesize the explanations from the provided data.
+4.  **Verified Sources**: List the sources that were used to verify the claims. You will have to infer these from the fact-check documents.
+5.  **Our Recommendation**: Write a corrected, more nuanced version of the main claim.
+6.  **Media Literacy Tip**: Provide a general, helpful tip for identifying similar misinformation in the future.
 
-truth_scorer_agent = FunctionAgent(
-    name="TruthScorer",
-    fn=TruthScorerAgent().run,
-    input_key="fact_checks",
-    output_key="scored_claims",
-)
+Here is the data you must use:
+{claims_str}
+"""
+        
+        response_formatter_agent = LlmAgent(
+            name="ResponseFormatter",
+            model="gemini-1.5-flash-latest",
+            instruction=formatter_instruction,
+        )
 
-# Use an LlmAgent only for the final, generative step
-response_formatter_agent = LlmAgent(
-    name="ResponseFormatter",
-    model="gemini-1.5-flash-latest",
-    instruction="You will receive a list of scored claims. Format them into a clear, concise, and user-friendly Markdown report. If the list is empty, state that no claims could be verified.",
-    output_key="final_report",
-)
-
-# 2. Define the top-level sequential agent
-FactosAgent = SequentialAgent(
-    name="FactosAgent",
-    sub_agents=[
-        smart_scraper_agent,
-        claim_extractor_agent,
-        fact_check_matcher_agent,
-        truth_scorer_agent,
-        response_formatter_agent,
-    ],
-) 
+        # Run the final formatter and yield its events
+        async for event in response_formatter_agent.run_async(ctx):
+            yield event 

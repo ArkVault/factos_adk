@@ -35,14 +35,29 @@ class ClaimExtractorAgent:
             print("No content to extract claims from.")
             return []
 
+        # Chunk the text to avoid memory errors with large articles
+        chunk_size = 4096  # A reasonable chunk size for a summarization model
+        overlap = 200
+        
+        text_chunks = [
+            text_content[i:i+chunk_size] 
+            for i in range(0, len(text_content), chunk_size - overlap)
+        ]
+
+        print(f"Split content into {len(text_chunks)} chunks.")
+
         # The summarizer expects a list of texts
         summaries: List[Dict[str, str]] = self._summarizer(
-            [text_content],
+            text_chunks,
             max_length=150,
             min_length=30,
-            do_sample=False
+            do_sample=False,
+            truncation=True # Ensure chunks that are slightly too long are handled
         )
         
         claims = [Claim(claim_text=summary['summary_text']) for summary in summaries]
-        print(f"Extracted {len(claims)} claims.")
-        return claims
+        # Remove duplicate claims that might arise from overlapping chunks
+        unique_claims = list({claim.claim_text: claim for claim in claims}.values())
+        
+        print(f"Extracted {len(unique_claims)} unique claims.")
+        return unique_claims

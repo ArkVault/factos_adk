@@ -39,7 +39,7 @@ async def main():
     
     runner = Runner(
         app_name="factos_adk",
-        agent=FactosAgent,
+        agent=FactosAgent(),
         session_service=session_service
     )
 
@@ -54,7 +54,7 @@ async def main():
     final_response = "No final response captured."
     for event in events:
         if event.is_final_response():
-            # Assuming the final response is in the text of the first part
+            # The final response is in the text of the first part
             if event.content and event.content.parts:
                 final_response = event.content.parts[0].text
             break # Exit after getting the final response
